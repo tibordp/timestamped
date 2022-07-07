@@ -1,0 +1,77 @@
+use std::process::env;
+use std::fs::{PathBuf, Path, FileAttr, PathSegmentKind};
+use std::io::{Result, FileDescriptor, Writable, Readable};
+use std::string::StringBuf;
+
+/// Finds the binary using the PATH environment variable.
+fn find_binary(command: &[u8]) -> Option<PathBuf> {
+    use std::option::try;
+    use std::string::split;
+
+    let original = Path::new(command);
+
+    // If the path looks like an absolute or relative path, do
+    // not try to resolve it using PATH
+    let segments = original.iter();
+    let first_segment = segments.next()?;
+
+    if first_segment.kind != PathSegmentKind::Normal
+        || segments.next().is_some  {
+        return Option::none()
+    }
+
+    let path_var = env()
+        .filter_map(|i: (&[u8], &[u8])| -> Option<&[u8]> {
+            if i.0 == "PATH" {
+                Option::some(i.1)
+            } else {
+                Option::none()
+            }
+        })
+        .next()?
+
+    path_var
+        .split(":")
+        .filter_map(|=original, i: &[u8]| -> Option<PathBuf> {
+            let resolved = PathBuf::from_str(i);
+            defer resolved.free();
+
+            resolved.push(original);
+
+            if FileAttr::from_path(resolved.as_path()).is_ok {
+                Option::some(resolved.move())
+            } else {
+                Option::none()
+            }
+        })
+        .next()
+}
+
+/// Write raw bits of any object to a stream
+fn write_any<T, W: Writable<W>>(self: &mut W, value: T) -> Result<()> {
+    use std::mem::{size_of, slice::from_raw};
+    self.write_all(from_raw(&value as &u8, size_of::<T>()))
+}
+
+/// Read raw bits of any object from a stream
+fn read_any<T, R: Readable<R>>(self: &mut R) -> Result<T> {
+    use std::mem::{uninitialized, size_of, slice::from_raw};
+    let ret = uninitialized::<T>();
+    self.read_exact(from_raw(&ret as &mut u8, size_of::<T>()))?;
+    Result::ok(ret)
+}
+
+/// Reads from the given file descriptor into a buffer until the read operation would block.
+fn read_some(self: &mut FileDescriptor, dst: &mut StringBuf) -> Result<bool> {
+    let maybe_n = self.read_to_end(dst);
+    if maybe_n.is_ok {
+        Result::ok(true)
+    } else {
+        let error = maybe_n.unwrap_err();
+        switch error.as_errno() {
+            Option::some(libc::EWOULDBLOCK),
+            Option::some(libc::EAGAIN) => Result::ok(false),
+            _ => Result::err(error)
+        }
+    }
+}

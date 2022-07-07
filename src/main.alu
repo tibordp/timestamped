@@ -1,0 +1,131 @@
+use std::fs::{PathBuf, Path, FileAttr, PathSegmentKind, File};
+use std::io::{
+    Result, StdioStream, Writable, Readable,
+    BufferedWriter, BufferedReader, DEFAULT_BUFFER_SIZE
+};
+
+use timestamped::recording::{Recorder, Replayer};
+
+enum State {
+    Normal,
+    Output,
+}
+
+fn record(args: &[&[u8]]) -> Result<()> {
+    macro usage() {
+        eprintln!("Usage: timestamped record [OPTIONS] -- <cmd> [<args>]");
+        eprintln!("");
+        eprintln!("Options:");
+        eprintln!("  -p, --passthrough          Pass through stdout and stderr");
+        eprintln!("  -o, --output <filename>    Write the recording to <filename>");
+        eprintln!("  -h, --help                 Print this help message");
+        process::exit(1)
+    }
+
+    let passthrough = false;
+    let output_filename: Option<Path> = Option::none();
+    let cmdline: Option<&[&[u8]]> = Option::none();
+
+    let state = State::Normal;
+    for (idx, arg) in args.iter().enumerate() {
+        state = switch state {
+            State::Normal => switch arg {
+                "-o", "--output" => State::Output,
+                "-p", "--passthrough" => {
+                    passthrough = true;
+                    State::Normal
+                }
+                "--" => {
+                    if idx == args.len - 1 {
+                        usage!();
+                    }
+                    cmdline = Option::some(args[idx + 1..]);
+                    break;
+                }
+                _ => usage!(),
+            },
+            State::Output => {
+                output_filename = Option::some(Path::new(arg));
+                State::Normal
+            }
+            _ => unreachable!()
+        }
+    }
+    if !cmdline.is_some {
+        usage!();
+    }
+
+    let stream = if output_filename.is_some {
+        let file = File::create(output_filename.inner)?
+        defer file.close();
+
+        &file as &mut dyn Writable
+    } else {
+        &StdioStream::stdout() as &mut dyn Writable
+    };
+
+    let buffered = BufferedWriter::new(&stream, DEFAULT_BUFFER_SIZE);
+    defer buffered.free();
+
+    let recorder = Recorder::new(cmdline.inner, &buffered, passthrough);
+    recorder.record()?;
+
+    buffered.flush()?;
+    Result::ok(())
+}
+
+fn replay(args: &[&[u8]]) -> Result<()> {
+    macro usage() {
+        eprintln!("Usage: timestamped replay [<file>]");
+        process::exit(1)
+    }
+
+    let stream = if args.len == 0 {
+        &StdioStream::stdin() as &mut dyn Readable
+    } else {
+        let file = File::open(Path::new(args[0]))?;
+        defer file.close();
+
+        &file as &mut dyn Readable
+    };
+
+    let buffered = BufferedReader::new(&stream, DEFAULT_BUFFER_SIZE);
+    defer buffered.free();
+
+    let replayer = Replayer::new(&buffered);
+    replayer.replay()?;
+
+    Result::ok(())
+}
+
+fn main(args: &[&[u8]]) -> i32 {
+    macro usage() {
+        eprintln!("Usage: timestamped <command> [<args>]");
+        eprintln!("");
+        eprintln!("Commands:");
+        eprintln!("  record [OPTIONS] -- <cmd> [<args>]    Record the output of <command>");
+        eprintln!("  replay [<file>]                       Replay the output from <file> (or stdin)");
+        eprintln!("");
+        eprintln!("Options:");
+        eprintln!("  -p, --passthrough          Pass through stdout and stderr");
+        eprintln!("  -o, --output <filename>    Write the recording to <filename>");
+        eprintln!("  -h, --help                 Print this help message");
+        process::exit(1);
+    }
+
+    if args.len < 2 {
+        usage!()
+    }
+    let ret = switch args[1] {
+        "record" => record(args[2..]),
+        "replay" => replay(args[2..]),
+        _ => usage!()
+    };
+
+    if ret.is_ok {
+        0
+    } else {
+        eprintln!("error: {}", ret.unwrap_err());
+        1
+    }
+}

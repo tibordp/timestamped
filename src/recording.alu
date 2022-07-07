@@ -1,0 +1,178 @@
+use std::process::{Command, Stdio, env};
+use std::fs::{PathBuf, Path, FileAttr, PathSegmentKind};
+use std::io::{Error, Result, FileDescriptor, StdioStream, BufferedWriter, DEFAULT_BUFFER_SIZE};
+use std::string::StringBuf;
+use std::time::{Duration, Instant};
+
+enum StandardStream {
+    In,
+    Out,
+    Err,
+}
+
+struct Recorder {
+    cmdline: &[&[u8]],
+    output: &mut dyn io::Writable,
+    passthrough: bool,
+    start_time: Instant
+}
+
+impl Recorder {
+    fn new(cmdline: &[&[u8]], output: &mut dyn io::Writable, passthrough: bool) -> Recorder {
+        Recorder {
+            output: output,
+            cmdline: cmdline,
+            start_time: Instant::now(),
+            passthrough: passthrough
+        }
+    }
+
+    fn record(self: &mut Recorder) -> Result<()> {
+        use utils::find_binary;
+
+        let command = self.cmdline[0]
+            .find_binary()
+            .unwrap_or(PathBuf::from_str(self.cmdline[0]));
+        defer command.free();
+
+        let child = Command::new(command.as_path())
+            .stdin(Stdio::Inherit)
+            .stdout(Stdio::Piped)
+            .stderr(Stdio::Piped)
+            .args(self.cmdline[1..])
+            .spawn()?;
+
+        self.start_time = Instant::now();
+        self.record_streams(&[
+            (StandardStream::Out, child.stdout.unwrap().as_fd()),
+            (StandardStream::Err, child.stderr.unwrap().as_fd())
+        ])?;
+
+        let status = child.wait()?;
+
+        Result::ok(())
+    }
+
+    fn write_output(self: &mut Recorder, timestamp: Instant, stream: StandardStream, output: &[u8]) -> Result<()> {
+        use utils::write_any;
+
+        if self.passthrough {
+            switch stream {
+                StandardStream::Out => StdioStream::stdout().write_all(output)?,
+                StandardStream::Err => StdioStream::stderr().write_all(output)?,
+                _ => {}
+            }
+        }
+
+        let since_start = timestamp.duration_since(&self.start_time);
+        let micros: u64 = (since_start.secs as u64) * 1000000 + (since_start.nanos as u64) / 1000;
+
+        self.output.write_any(stream as u8)?;
+        self.output.write_any(micros.to_be())?;
+        self.output.write_any(output.len.to_be())?;
+        self.output.write_all(output)?;
+
+        Result::ok(())
+    }
+
+    fn record_streams(self: &mut Recorder, inputs: &mut [(StandardStream, FileDescriptor)]) -> Result<()> {
+        use utils::read_some;
+        use std::io::unix::errno_try;
+
+        let remaining = inputs.len;
+        let fds: &mut [libc::pollfd] = mem::slice::alloc(inputs.len);
+        defer fds.free();
+
+        for (i, stream) in inputs.iter().enumerate() {
+            stream.1.set_nonblocking(true)?;
+            fds[i].fd = stream.1.value;
+            fds[i].events = libc::POLLIN;
+        }
+
+        let buf: StringBuf = StringBuf::new();
+        defer buf.free();
+
+        loop {
+            errno_try!(libc::poll(&fds[0], std::util::cast(inputs.len), -1));
+
+            let timestamp = Instant::now();
+            for i in 0usize..inputs.len {
+                if fds[i].revents != 0 {
+                    if inputs[i].1.read_some(&buf)? {
+                        inputs[i].1.close();
+                        fds[i].revents = 0;
+                        fds[i].fd = -1;
+                        remaining -= 1;
+                    }
+                    if !buf.is_empty() {
+                        self.write_output(timestamp, inputs[i].0, buf.as_slice())?;
+                        buf.clear();
+                    }
+                }
+            }
+
+            if remaining == 0 {
+                break;
+            }
+        }
+
+        Result::ok(())
+    }
+}
+
+struct Replayer {
+    input: &mut dyn io::Readable,
+}
+
+impl Replayer {
+    fn new(input: &mut dyn io::Readable) -> Replayer {
+        Replayer {
+            input: input
+        }
+    }
+
+    fn read_header(self: &mut Replayer) -> Result<(StandardStream, u64, u64)> {
+        use std::io::read_byte;
+        use utils::read_any;
+
+        let stream: u8 = self.input.read_byte()?;
+        let maybe_micros: Result<u64> = self.input.read_any();
+        let micros = maybe_micros?.from_be();
+        let maybe_len: Result<u64> = self.input.read_any();
+        let len = maybe_len?.from_be();
+
+        Result::ok((stream as StandardStream, micros, len))
+    }
+
+    fn replay(self: &mut Replayer) -> Result<()> {
+        use std::io::{copy_using, take};
+        let start_time = Instant::now();
+
+        let buf: &mut [u8] = std::mem::slice::alloc(DEFAULT_BUFFER_SIZE);
+        defer buf.free();
+
+        loop {
+            let maybe_header = self.read_header();
+            if !maybe_header.is_ok && maybe_header.unwrap_err() == Error::eof() {
+                break;
+            }
+
+            let (stream, micros, len) = maybe_header.unwrap();
+            let due_time = start_time.add(&Duration::from_micros(micros as i64));
+            std::thread::sleep(due_time.duration_since(&Instant::now()));
+
+            switch stream {
+                StandardStream::Out => {
+                    self.input.take(len).copy_using(&StdioStream::stdout(), buf)?;
+                },
+                StandardStream::Err => {
+                    self.input.take(len).copy_using(&StdioStream::stderr(), buf)?;
+                },
+                _ => {}
+            }
+        }
+
+
+        Result::ok(())
+    }
+}
