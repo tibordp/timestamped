@@ -12,11 +12,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Install Alumina
+    - name: Install Alumina compiler
       working-directory: /tmp
       env:
         RELEASE: 1
       run: |
+        npm install -g tree-sitter-cli
         git clone https://github.com/tibordp/alumina.git
         cd alumina
         RELEASE=1 make alumina-boot
