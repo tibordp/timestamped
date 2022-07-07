@@ -1,0 +1,29 @@
+name: Makefile CI
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Install Alumina
+      working-directory: /tmp
+      env:
+        RELEASE: 1
+      run: |
+        git clone https://github.com/tibordp/alumina.git
+        cd alumina
+        RELEASE=1 make alumina-boot
+        sudo RELEASE=1 make install
+
+    - name: Build timestamped
+      run: make
+      
+    - name: Run tests
+      run: make tests
