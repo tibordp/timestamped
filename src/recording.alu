@@ -28,7 +28,7 @@ impl Recorder {
     }
 
     fn record(self: &mut Recorder) -> Result<()> {
-        use utils::find_binary;
+        use utils::{find_binary, write_any};
 
         let command = self.cmdline[0]
             .find_binary()
@@ -50,6 +50,9 @@ impl Recorder {
 
         let status = child.wait()?;
 
+        self.output.write_all("\0");
+        self.output.write_any((status as u32).to_be())?;
+
         Result::ok(())
     }
 
@@ -67,7 +70,7 @@ impl Recorder {
         let since_start = timestamp.duration_since(&self.start_time);
         let micros: u64 = (since_start.secs as u64) * 1000000 + (since_start.nanos as u64) / 1000;
 
-        self.output.write_any(stream as u8)?;
+        self.output.write_any((stream as u8) | 0b10000000u8)?;
         self.output.write_any(micros.to_be())?;
         self.output.write_any(output.len.to_be())?;
         self.output.write_all(output)?;
@@ -131,30 +134,37 @@ impl Replayer {
         }
     }
 
-    fn read_header(self: &mut Replayer) -> Result<(StandardStream, u64, u64)> {
+    fn read_header(self: &mut Replayer) -> Result<Option<(StandardStream, u64, u64)>> {
         use std::io::read_byte;
         use utils::read_any;
 
-        let stream: u8 = self.input.read_byte()?;
+        let stream = self.input.read_byte()?;
+        if stream == 0 {
+
+            return Result::ok(Option::none());
+        }
+
         let maybe_micros: Result<u64> = self.input.read_any();
         let micros = maybe_micros?.from_be();
         let maybe_len: Result<u64> = self.input.read_any();
         let len = maybe_len?.from_be();
 
-        Result::ok((stream as StandardStream, micros, len))
+        Result::ok(Option::some(((stream & 0b01111111u8) as StandardStream, micros, len)))
     }
 
-    fn replay(self: &mut Replayer) -> Result<()> {
+    fn replay(self: &mut Replayer) -> Result<i32> {
         use std::io::{copy_using, take};
+        use utils::read_any;
         let start_time = Instant::now();
 
         let buf: &mut [u8] = std::mem::slice::alloc(DEFAULT_BUFFER_SIZE);
         defer buf.free();
 
         loop {
-            let maybe_header = self.read_header();
-            if !maybe_header.is_ok && maybe_header.unwrap_err() == Error::eof() {
-                break;
+            let maybe_header = self.read_header()?;
+            if !maybe_header.is_some {
+                let maybe_exit_code: Result<u32> = self.input.read_any();
+                return Result::ok(maybe_exit_code?.from_be() as i32);
             }
 
             let (stream, micros, len) = maybe_header.unwrap();
@@ -168,11 +178,8 @@ impl Replayer {
                 StandardStream::Err => {
                     self.input.take(len).copy_using(&StdioStream::stderr(), buf)?;
                 },
-                _ => {}
+                _ => return Result::err(Error::custom("invalid recording"))
             }
         }
-
-
-        Result::ok(())
     }
 }

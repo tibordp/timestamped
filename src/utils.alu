@@ -75,3 +75,48 @@ fn read_some(self: &mut FileDescriptor, dst: &mut StringBuf) -> Result<bool> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::io::{StringWriter, SliceReader};
+    use std::{assert, assert_eq};
+    use std::string::ends_with;
+
+    #[test]
+    fn test_find_binary() {
+        let maybe_sh = find_binary("sh");
+
+        assert!(maybe_sh
+            .unwrap()
+            .as_path()
+            .as_slice()
+            .ends_with("/bin/sh")
+        );
+    }
+
+    #[test]
+    fn test_read_any() {
+        #[cfg(target_endian = "big")]
+        let buf = [1u8, 2, 3, 4];
+        #[cfg(target_endian = "little")]
+        let buf = [4u8, 3, 2, 1];
+
+        let reader = SliceReader::new(&buf);
+        let result: Result<i32> = reader.read_any();
+
+        assert_eq!(result.unwrap(), 0x01020304);
+    }
+
+    #[test]
+    fn test_write_any() {
+        let buf: StringBuf = StringBuf::new();
+        let writer = StringWriter::new(&buf);
+
+        writer.write_any(0x01020304i32).unwrap();
+
+        #[cfg(target_endian = "big")]
+        assert_eq!(buf.as_slice(), "\x01\x02\x03\x04");
+        #[cfg(target_endian = "little")]
+        assert_eq!(buf.as_slice(), "\x04\x03\x02\x01");
+    }
+}

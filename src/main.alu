@@ -93,9 +93,18 @@ fn replay(args: &[&[u8]]) -> Result<()> {
     defer buffered.free();
 
     let replayer = Replayer::new(&buffered);
-    replayer.replay()?;
+    let exit_status = replayer.replay()?;
 
-    Result::ok(())
+    if (exit_status & 0x7f) == 0 {
+        std::process::exit((exit_status >> 8) & 0xff)
+    } else if ((exit_status & 0x7f) + 1) as i8 >= 2 {
+        // Faithfully recreate process terminating due to a signal
+        // by killing ourselves.
+        libc::kill(libc::getpid(), exit_status & 0x7f);
+        unreachable!()
+    } else {
+        std::process::exit(-1);
+    }
 }
 
 fn main(args: &[&[u8]]) -> i32 {
