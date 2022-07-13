@@ -47,6 +47,59 @@ fn find_binary(command: &[u8]) -> Option<PathBuf> {
         .next()
 }
 
+const BASE64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+struct Base64Encoder {
+    inner: &[u8]
+}
+
+impl Base64Encoder {
+    use std::fmt::{Formattable, Formatter, Result};
+
+    fn new(bytes: &[u8]) -> Base64Encoder {
+        Base64Encoder {
+            inner: bytes
+        }
+    }
+
+    fn fmt<F: Formatter<F>>(self: &Base64Encoder, f: &mut F) -> Result {
+        let acc: u16;
+        let remaining = 0i32;
+        let idx = 0usize;
+
+        loop {
+            if remaining < 6 {
+                if idx == self.inner.len {
+                    break;
+                }
+                acc = acc << 8 | self.inner[idx] as u16;
+                idx += 1;
+                remaining += 8;
+            }
+
+            let bits = (acc >> (remaining - 6)) & 0x3f;
+            f.write_char(BASE64[bits as usize]);
+            remaining -= 6;
+        }
+
+        switch remaining {
+            2 => {
+                let bits = (acc & 0x3) << 4;
+                f.write_char(BASE64[bits as usize]);
+                f.write_str("==");
+            }
+            4 => {
+                let bits = (acc & 0xf) << 2;
+                f.write_char(BASE64[bits as usize]);
+                f.write_str("=");
+            }
+            _ => {}
+        }
+
+        Result::ok(())
+    }
+}
+
 /// Write raw bits of any object to a stream
 fn write_any<T, W: Writable<W>>(self: &mut W, value: T) -> Result<()> {
     use std::mem::{size_of, slice::from_raw};
@@ -76,11 +129,19 @@ fn read_some(self: &mut FileDescriptor, dst: &mut StringBuf) -> Result<bool> {
     }
 }
 
+/// Convert fmt::Error to io::Error
+fn map_err(_: fmt::Error) -> io::Error {
+    io::Error::custom("error while writing to stream")
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::{StringWriter, SliceReader};
     use std::{assert, assert_eq};
+    use std::fmt::format_in;
     use std::string::ends_with;
+
+    static BUF: [u8; 64];
 
     #[test]
     fn test_find_binary() {
@@ -118,5 +179,16 @@ mod tests {
         assert_eq!(buf.as_slice(), "\x01\x02\x03\x04");
         #[cfg(target_endian = "little")]
         assert_eq!(buf.as_slice(), "\x04\x03\x02\x01");
+    }
+
+    #[test]
+    fn test_base64() {
+        assert_eq!(format_in!(&BUF, "{}", Base64Encoder::new("")).unwrap(), "");
+        assert_eq!(format_in!(&BUF, "{}", Base64Encoder::new("f")).unwrap(), "Zg==");
+        assert_eq!(format_in!(&BUF, "{}", Base64Encoder::new("fo")).unwrap(), "Zm8=");
+        assert_eq!(format_in!(&BUF, "{}", Base64Encoder::new("foo")).unwrap(), "Zm9v");
+        assert_eq!(format_in!(&BUF, "{}", Base64Encoder::new("foob")).unwrap(), "Zm9vYg==");
+        assert_eq!(format_in!(&BUF, "{}", Base64Encoder::new("fooba")).unwrap(), "Zm9vYmE=");
+        assert_eq!(format_in!(&BUF, "{}", Base64Encoder::new("foobar")).unwrap(), "Zm9vYmFy");
     }
 }

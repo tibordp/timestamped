@@ -123,8 +123,27 @@ impl Recorder {
     }
 }
 
+/// Read the header of a recorded message
+fn read_header(input: &mut dyn io::Readable) -> Result<Option<(StandardStream, u64, u64)>> {
+    use std::io::read_byte;
+    use utils::read_any;
+
+    let stream = input.read_byte()?;
+    if stream == 0 {
+
+        return Result::ok(Option::none());
+    }
+
+    let maybe_micros: Result<u64> = input.read_any();
+    let micros = maybe_micros?.from_be();
+    let maybe_len: Result<u64> = input.read_any();
+    let len = maybe_len?.from_be();
+
+    Result::ok(Option::some(((stream & 0b01111111u8) as StandardStream, micros, len)))
+}
+
 struct Replayer {
-    input: &mut dyn io::Readable,
+    input: &mut dyn io::Readable
 }
 
 impl Replayer {
@@ -132,24 +151,6 @@ impl Replayer {
         Replayer {
             input: input
         }
-    }
-
-    fn read_header(self: &mut Replayer) -> Result<Option<(StandardStream, u64, u64)>> {
-        use std::io::read_byte;
-        use utils::read_any;
-
-        let stream = self.input.read_byte()?;
-        if stream == 0 {
-
-            return Result::ok(Option::none());
-        }
-
-        let maybe_micros: Result<u64> = self.input.read_any();
-        let micros = maybe_micros?.from_be();
-        let maybe_len: Result<u64> = self.input.read_any();
-        let len = maybe_len?.from_be();
-
-        Result::ok(Option::some(((stream & 0b01111111u8) as StandardStream, micros, len)))
     }
 
     fn replay(self: &mut Replayer) -> Result<i32> {
@@ -161,7 +162,7 @@ impl Replayer {
         defer buf.free();
 
         loop {
-            let maybe_header = self.read_header()?;
+            let maybe_header = self.input.read_header()?;
             if !maybe_header.is_some {
                 let maybe_exit_code: Result<u32> = self.input.read_any();
                 return Result::ok(maybe_exit_code?.from_be() as i32);
@@ -181,5 +182,65 @@ impl Replayer {
                 _ => return Result::err(Error::custom("invalid recording"))
             }
         }
+    }
+}
+
+struct JsonConverter {
+    input: &mut dyn io::Readable,
+    output: &mut dyn io::Writable
+}
+
+impl JsonConverter {
+    use std::fmt::StreamFormatter;
+    use std::fmt::write;
+
+    fn new(input: &mut dyn io::Readable, output: &mut dyn io::Writable) -> JsonConverter {
+        JsonConverter {
+            input: input,
+            output: output
+        }
+    }
+
+    fn convert(self: &mut JsonConverter) -> Result<()> {
+        use utils::{map_err, read_any, Base64Encoder};
+        use std::io::take;
+
+        let buf: StringBuf = StringBuf::new();
+        defer buf.free();
+
+        let fmt = StreamFormatter::new(&self.output);
+
+        write!(&fmt, "{{\"output\":[").map_err(map_err)?;
+        let first = true;
+        loop {
+            let maybe_header = self.input.read_header()?;
+            if !maybe_header.is_some {
+                break
+            }
+
+            let (stream, micros, len) = maybe_header.unwrap();
+            buf.clear();
+            self.input.take(len).read_to_end(&buf)?;
+
+            if !first {
+                write!(&fmt, ",").map_err(map_err)?;
+            }
+
+            first = false;
+
+            write!(&fmt,
+                "{{\"stream\":{},\"micros\":{},\"contents\":\"{}\"}}",
+                stream as u8,
+                micros,
+                Base64Encoder::new(buf.as_slice())
+            )
+            .map_err(map_err)?;
+        }
+
+        let maybe_exit_code: Result<i32> = self.input.read_any();
+
+        write!(&fmt, "],\"exit_code\":{}}}", maybe_exit_code?).map_err(map_err)?;
+
+        Result::ok(())
     }
 }

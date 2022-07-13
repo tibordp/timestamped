@@ -4,11 +4,12 @@ use std::io::{
     BufferedWriter, BufferedReader, DEFAULT_BUFFER_SIZE
 };
 
-use timestamped::recording::{Recorder, Replayer};
+use timestamped::recording::{Recorder, Replayer, JsonConverter};
 
 enum State {
     Normal,
     Output,
+    Finished
 }
 
 fn record(args: &[&[u8]]) -> Result<()> {
@@ -107,6 +108,69 @@ fn replay(args: &[&[u8]]) -> Result<()> {
     }
 }
 
+fn json(args: &[&[u8]]) -> Result<()> {
+    macro usage() {
+        eprintln!("Usage: timestamped json [<file>]");
+        eprintln!("Options:");
+        eprintln!("  -o, --output <filename>    Write the recording to <filename>");
+        process::exit(1)
+    }
+
+    let output_filename: Option<Path> = Option::none();
+    let input_filename: Option<Path> = Option::none();
+
+    let state = State::Normal;
+    for (idx, arg) in args.iter().enumerate() {
+        state = switch state {
+            State::Normal => switch arg {
+                "-o", "--output" => State::Output,
+                _ => {
+                    input_filename = Option::some(Path::new(arg));
+                    State::Finished
+                },
+            },
+            State::Output => {
+                output_filename = Option::some(Path::new(arg));
+                State::Normal
+            }
+            _ => usage!()
+        }
+    }
+    if state != State::Finished && state != State::Normal {
+        usage!();
+    }
+
+    let output = if output_filename.is_some {
+        let file = File::create(output_filename.inner)?
+        defer file.close();
+
+        &file as &mut dyn Writable
+    } else {
+        &StdioStream::stdout() as &mut dyn Writable
+    };
+
+    let input = if input_filename.is_some {
+        let file = File::open(input_filename.inner)?;
+        defer file.close();
+
+        &file as &mut dyn Readable
+    } else {
+        &StdioStream::stdin() as &mut dyn Readable
+    };
+
+    let input = BufferedReader::new(&input, DEFAULT_BUFFER_SIZE);
+    defer input.free();
+
+    let output = BufferedWriter::new(&output, DEFAULT_BUFFER_SIZE);
+    defer output.free();
+
+    let converter = JsonConverter::new(&input, &output);
+    converter.convert()?;
+
+    output.flush()?;
+    Result::ok(())
+}
+
 fn main(args: &[&[u8]]) -> i32 {
     macro usage() {
         eprintln!("Usage: timestamped <command> [<args>]");
@@ -114,6 +178,7 @@ fn main(args: &[&[u8]]) -> i32 {
         eprintln!("Commands:");
         eprintln!("  record [OPTIONS] -- <cmd> [<args>]    Record the output of <command>");
         eprintln!("  replay [<file>]                       Replay the output from <file> (or stdin)");
+        eprintln!("  json [<file>]                         Convert a recording from <file> (or stdin) to JSON");
         eprintln!("");
         eprintln!("Options:");
         eprintln!("  -p, --passthrough          Pass through stdout and stderr");
@@ -128,6 +193,7 @@ fn main(args: &[&[u8]]) -> i32 {
     let ret = switch args[1] {
         "record" => record(args[2..]),
         "replay" => replay(args[2..]),
+        "json" => json(args[2..]),
         _ => usage!()
     };
 
