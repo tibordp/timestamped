@@ -6,11 +6,6 @@ use std::io::{
 
 use timestamped::recording::{Recorder, Replayer, JsonConverter};
 
-enum State {
-    Normal,
-    Output,
-    Finished
-}
 
 fn record(args: &[&[u8]]) -> Result<()> {
     macro usage() {
@@ -27,6 +22,12 @@ fn record(args: &[&[u8]]) -> Result<()> {
     let output_filename: Option<Path> = Option::none();
     let cmdline: Option<&[&[u8]]> = Option::none();
 
+    enum State {
+        Normal,
+        Output,
+        Finished
+    }
+
     let state = State::Normal;
     for (idx, arg) in args.iter().enumerate() {
         state = switch state {
@@ -37,7 +38,7 @@ fn record(args: &[&[u8]]) -> Result<()> {
                     State::Normal
                 }
                 "--" => {
-                    if idx == args.len - 1 {
+                    if idx == args.len() - 1 {
                         usage!();
                     }
                     cmdline = Option::some(args[idx + 1..]);
@@ -81,7 +82,7 @@ fn replay(args: &[&[u8]]) -> Result<()> {
         process::exit(1)
     }
 
-    let stream = if args.len == 0 {
+    let stream = if args.len() == 0 {
         &StdioStream::stdin() as &mut dyn Readable
     } else {
         let file = File::open(Path::new(args[0]))?;
@@ -118,6 +119,12 @@ fn json(args: &[&[u8]]) -> Result<()> {
 
     let output_filename: Option<Path> = Option::none();
     let input_filename: Option<Path> = Option::none();
+
+    enum State {
+        Normal,
+        Output,
+        Finished
+    }
 
     let state = State::Normal;
     for (idx, arg) in args.iter().enumerate() {
@@ -187,7 +194,7 @@ fn main(args: &[&[u8]]) -> i32 {
         process::exit(1);
     }
 
-    if args.len < 2 {
+    if args.len() < 2 {
         usage!()
     }
     let ret = switch args[1] {

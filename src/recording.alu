@@ -72,7 +72,7 @@ impl Recorder {
 
         self.output.write_any((stream as u8) | 0b10000000u8)?;
         self.output.write_any(micros.to_be())?;
-        self.output.write_any(output.len.to_be())?;
+        self.output.write_any(output.len().to_be())?;
         self.output.write_all(output)?;
 
         Result::ok(())
@@ -82,8 +82,8 @@ impl Recorder {
         use utils::read_some;
         use std::io::unix::errno_try;
 
-        let remaining = inputs.len;
-        let fds: &mut [libc::pollfd] = mem::slice::alloc(inputs.len);
+        let remaining = inputs.len();
+        let fds: &mut [libc::pollfd] = mem::slice::alloc(inputs.len());
         defer fds.free();
 
         for (i, stream) in inputs.iter().enumerate() {
@@ -96,10 +96,10 @@ impl Recorder {
         defer buf.free();
 
         loop {
-            errno_try!(libc::poll(&fds[0], std::util::cast(inputs.len), -1));
+            errno_try!(libc::poll(&fds[0], std::util::cast(inputs.len()), -1));
 
             let timestamp = Instant::now();
-            for i in 0usize..inputs.len {
+            for i in 0usize..inputs.len() {
                 if fds[i].revents != 0 {
                     if inputs[i].1.read_some(&buf)? {
                         inputs[i].1.close();
@@ -164,8 +164,8 @@ impl Replayer {
         loop {
             let maybe_header = self.input.read_header()?;
             if !maybe_header.is_some {
-                let maybe_exit_code: Result<u32> = self.input.read_any();
-                return Result::ok(maybe_exit_code?.from_be() as i32);
+                let maybe_exit_status: Result<u32> = self.input.read_any();
+                return Result::ok(maybe_exit_status?.from_be() as i32);
             }
 
             let (stream, micros, len) = maybe_header.unwrap();
@@ -202,7 +202,7 @@ impl JsonConverter {
     }
 
     fn convert(self: &mut JsonConverter) -> Result<()> {
-        use utils::{map_err, read_any, Base64Encoder};
+        use utils::{map_err, read_any, to_base64};
         use std::io::take;
 
         let buf: StringBuf = StringBuf::new();
@@ -232,14 +232,13 @@ impl JsonConverter {
                 "{{\"stream\":{},\"micros\":{},\"contents\":\"{}\"}}",
                 stream as u8,
                 micros,
-                Base64Encoder::new(buf.as_slice())
+                buf.as_slice().to_base64()
             )
             .map_err(map_err)?;
         }
 
-        let maybe_exit_code: Result<i32> = self.input.read_any();
-
-        write!(&fmt, "],\"exit_code\":{}}}", maybe_exit_code?).map_err(map_err)?;
+        let maybe_exit_status: Result<u32> = self.input.read_any();
+        write!(&fmt, "],\"exit_status\":{}}}", maybe_exit_status?.from_be() as i32).map_err(map_err)?;
 
         Result::ok(())
     }

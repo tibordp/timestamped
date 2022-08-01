@@ -20,17 +20,8 @@ fn find_binary(command: &[u8]) -> Option<PathBuf> {
         return Option::none()
     }
 
-    let path_var = env()
-        .filter_map(|i: (&[u8], &[u8])| -> Option<&[u8]> {
-            if i.0 == "PATH" {
-                Option::some(i.1)
-            } else {
-                Option::none()
-            }
-        })
-        .next()?
-
-    path_var
+    env()
+        .get("PATH")?
         .split(":")
         .filter_map(|=original, i: &[u8]| -> Option<PathBuf> {
             let resolved = PathBuf::from_str(i);
@@ -47,29 +38,30 @@ fn find_binary(command: &[u8]) -> Option<PathBuf> {
         .next()
 }
 
-const BASE64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-struct Base64Encoder {
+/// Formatting adapter that outputs base64 encoded data.
+struct Base64Encoded {
     inner: &[u8]
 }
 
-impl Base64Encoder {
+impl Base64Encoded {
     use std::fmt::{Formattable, Formatter, Result};
 
-    fn new(bytes: &[u8]) -> Base64Encoder {
-        Base64Encoder {
+    fn new(bytes: &[u8]) -> Base64Encoded {
+        Base64Encoded {
             inner: bytes
         }
     }
 
-    fn fmt<F: Formatter<F>>(self: &Base64Encoder, f: &mut F) -> Result {
+    fn fmt<F: Formatter<F>>(self: &Base64Encoded, f: &mut F) -> Result {
+        const BASE64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
         let acc: u16;
         let remaining = 0i32;
         let idx = 0usize;
 
         loop {
             if remaining < 6 {
-                if idx == self.inner.len {
+                if idx == self.inner.len() {
                     break;
                 }
                 acc = acc << 8 | self.inner[idx] as u16;
@@ -98,6 +90,11 @@ impl Base64Encoder {
 
         Result::ok(())
     }
+}
+
+/// Convert a string to a base64 representation
+fn to_base64(bytes: &[u8]) -> Base64Encoded {
+    Base64Encoded::new(bytes)
 }
 
 /// Write raw bits of any object to a stream
@@ -183,12 +180,12 @@ mod tests {
 
     #[test]
     fn test_base64() {
-        assert_eq!(format_in!(&BUF, "{}", Base64Encoder::new("")).unwrap(), "");
-        assert_eq!(format_in!(&BUF, "{}", Base64Encoder::new("f")).unwrap(), "Zg==");
-        assert_eq!(format_in!(&BUF, "{}", Base64Encoder::new("fo")).unwrap(), "Zm8=");
-        assert_eq!(format_in!(&BUF, "{}", Base64Encoder::new("foo")).unwrap(), "Zm9v");
-        assert_eq!(format_in!(&BUF, "{}", Base64Encoder::new("foob")).unwrap(), "Zm9vYg==");
-        assert_eq!(format_in!(&BUF, "{}", Base64Encoder::new("fooba")).unwrap(), "Zm9vYmE=");
-        assert_eq!(format_in!(&BUF, "{}", Base64Encoder::new("foobar")).unwrap(), "Zm9vYmFy");
+        assert_eq!(format_in!(&BUF, "{}", "".to_base64()).unwrap(), "");
+        assert_eq!(format_in!(&BUF, "{}", "f".to_base64()).unwrap(), "Zg==");
+        assert_eq!(format_in!(&BUF, "{}", "fo".to_base64()).unwrap(), "Zm8=");
+        assert_eq!(format_in!(&BUF, "{}", "foo".to_base64()).unwrap(), "Zm9v");
+        assert_eq!(format_in!(&BUF, "{}", "foob".to_base64()).unwrap(), "Zm9vYg==");
+        assert_eq!(format_in!(&BUF, "{}", "fooba".to_base64()).unwrap(), "Zm9vYmE=");
+        assert_eq!(format_in!(&BUF, "{}", "foobar".to_base64()).unwrap(), "Zm9vYmFy");
     }
 }
