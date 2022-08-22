@@ -53,12 +53,12 @@ fn record(args: &[&[u8]]) -> Result<()> {
             _ => unreachable!()
         }
     }
-    if !cmdline.is_some {
+    if !cmdline.is_some() {
         usage!();
     }
 
-    let stream = if output_filename.is_some {
-        let file = File::create(output_filename.inner)?
+    let stream = if output_filename.is_some() {
+        let file = File::create(output_filename.unwrap())?
         defer file.close();
 
         &file as &mut dyn Writable
@@ -69,7 +69,7 @@ fn record(args: &[&[u8]]) -> Result<()> {
     let buffered = BufferedWriter::new(&stream, DEFAULT_BUFFER_SIZE);
     defer buffered.free();
 
-    let recorder = Recorder::new(cmdline.inner, &buffered, passthrough);
+    let recorder = Recorder::new(cmdline.unwrap(), &buffered, passthrough);
     recorder.record()?;
 
     buffered.flush()?;
@@ -147,8 +147,8 @@ fn json(args: &[&[u8]]) -> Result<()> {
         usage!();
     }
 
-    let output = if output_filename.is_some {
-        let file = File::create(output_filename.inner)?
+    let output = if output_filename.is_some() {
+        let file = File::create(output_filename.unwrap())?
         defer file.close();
 
         &file as &mut dyn Writable
@@ -156,8 +156,8 @@ fn json(args: &[&[u8]]) -> Result<()> {
         &StdioStream::stdout() as &mut dyn Writable
     };
 
-    let input = if input_filename.is_some {
-        let file = File::open(input_filename.inner)?;
+    let input = if input_filename.is_some() {
+        let file = File::open(input_filename.unwrap())?;
         defer file.close();
 
         &file as &mut dyn Readable
@@ -204,7 +204,7 @@ fn main(args: &[&[u8]]) -> i32 {
         _ => usage!()
     };
 
-    if ret.is_ok {
+    if ret.is_ok() {
         0
     } else {
         eprintln!("error: {}", ret.unwrap_err());

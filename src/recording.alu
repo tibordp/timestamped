@@ -163,7 +163,7 @@ impl Replayer {
 
         loop {
             let maybe_header = self.input.read_header()?;
-            if !maybe_header.is_some {
+            if !maybe_header.is_some() {
                 let maybe_exit_status: Result<u32> = self.input.read_any();
                 return Result::ok(maybe_exit_status?.from_be() as i32);
             }
@@ -214,7 +214,7 @@ impl JsonConverter {
         let first = true;
         loop {
             let maybe_header = self.input.read_header()?;
-            if !maybe_header.is_some {
+            if !maybe_header.is_some() {
                 break
             }
 

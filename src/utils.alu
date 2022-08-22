@@ -16,7 +16,7 @@ fn find_binary(command: &[u8]) -> Option<PathBuf> {
     let first_segment = segments.next()?;
 
     if first_segment.kind != PathSegmentKind::Normal
-        || segments.next().is_some  {
+        || segments.next().is_some()  {
         return Option::none()
     }
 
@@ -29,7 +29,7 @@ fn find_binary(command: &[u8]) -> Option<PathBuf> {
 
             resolved.push(original);
 
-            if FileAttr::from_path(resolved.as_path()).is_ok {
+            if FileAttr::from_path(resolved.as_path()).is_ok() {
                 Option::some(resolved.move())
             } else {
                 Option::none()
@@ -114,7 +114,7 @@ fn read_any<T, R: Readable<R>>(self: &mut R) -> Result<T> {
 /// Reads from the given file descriptor into a buffer until the read operation would block.
 fn read_some(self: &mut FileDescriptor, dst: &mut StringBuf) -> Result<bool> {
     let maybe_n = self.read_to_end(dst);
-    if maybe_n.is_ok {
+    if maybe_n.is_ok() {
         Result::ok(true)
     } else {
         let error = maybe_n.unwrap_err();
