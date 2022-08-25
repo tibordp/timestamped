@@ -12,13 +12,13 @@ enum StandardStream {
 
 struct Recorder {
     cmdline: &[&[u8]],
-    output: &mut dyn io::Writable,
+    output: &mut dyn io::Writable<Self>,
     passthrough: bool,
     start_time: Instant
 }
 
 impl Recorder {
-    fn new(cmdline: &[&[u8]], output: &mut dyn io::Writable, passthrough: bool) -> Recorder {
+    fn new(cmdline: &[&[u8]], output: &mut dyn io::Writable<Self>, passthrough: bool) -> Recorder {
         Recorder {
             output: output,
             cmdline: cmdline,
@@ -124,7 +124,7 @@ impl Recorder {
 }
 
 /// Read the header of a recorded message
-fn read_header(input: &mut dyn io::Readable) -> Result<Option<(StandardStream, u64, u64)>> {
+fn read_header(input: &mut dyn io::Readable<Self>) -> Result<Option<(StandardStream, u64, u64)>> {
     use std::io::read_byte;
     use utils::read_any;
 
@@ -143,11 +143,11 @@ fn read_header(input: &mut dyn io::Readable) -> Result<Option<(StandardStream, u
 }
 
 struct Replayer {
-    input: &mut dyn io::Readable
+    input: &mut dyn io::Readable<Self>
 }
 
 impl Replayer {
-    fn new(input: &mut dyn io::Readable) -> Replayer {
+    fn new(input: &mut dyn io::Readable<Self>) -> Replayer {
         Replayer {
             input: input
         }
@@ -186,15 +186,15 @@ impl Replayer {
 }
 
 struct JsonConverter {
-    input: &mut dyn io::Readable,
-    output: &mut dyn io::Writable
+    input: &mut dyn io::Readable<Self>,
+    output: &mut dyn io::Writable<Self>
 }
 
 impl JsonConverter {
     use std::fmt::StreamFormatter;
     use std::fmt::write;
 
-    fn new(input: &mut dyn io::Readable, output: &mut dyn io::Writable) -> JsonConverter {
+    fn new(input: &mut dyn io::Readable<Self>, output: &mut dyn io::Writable<Self>) -> JsonConverter {
         JsonConverter {
             input: input,
             output: output
