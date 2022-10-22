@@ -146,8 +146,7 @@ mod tests {
 
         assert!(maybe_sh
             .unwrap()
-            .as_path()
-            .as_slice()
+            .as_path()[..]
             .ends_with("/bin/sh")
         );
     }
@@ -173,9 +172,9 @@ mod tests {
         writer.write_any(0x01020304i32).unwrap();
 
         #[cfg(target_endian = "big")]
-        assert_eq!(buf.as_slice(), "\x01\x02\x03\x04");
+        assert_eq!(buf[..] as &[u8], "\x01\x02\x03\x04");
         #[cfg(target_endian = "little")]
-        assert_eq!(buf.as_slice(), "\x04\x03\x02\x01");
+        assert_eq!(buf[..] as &[u8], "\x04\x03\x02\x01");
     }
 
     #[test]

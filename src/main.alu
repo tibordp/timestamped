@@ -57,13 +57,13 @@ fn record(args: &[&[u8]]) -> Result<()> {
         usage!();
     }
 
-    let stream = if output_filename.is_some() {
-        let file = File::create(output_filename.unwrap())?
+    let stream: &mut dyn Writable<Self> = if output_filename.is_some() {
+        let file = File::create(output_filename.unwrap())?;
         defer file.close();
 
-        &file as &mut dyn Writable<Self>
+        &file
     } else {
-        &StdioStream::stdout() as &mut dyn Writable<Self>
+        &StdioStream::stdout()
     };
 
     let buffered = BufferedWriter::new(&stream, DEFAULT_BUFFER_SIZE);
@@ -147,22 +147,22 @@ fn json(args: &[&[u8]]) -> Result<()> {
         usage!();
     }
 
-    let output = if output_filename.is_some() {
+    let output: &mut dyn Writable<Self> = if output_filename.is_some() {
         let file = File::create(output_filename.unwrap())?
         defer file.close();
 
-        &file as &mut dyn Writable<Self>
+        &file
     } else {
-        &StdioStream::stdout() as &mut dyn Writable<Self>
+        &StdioStream::stdout()
     };
 
-    let input = if input_filename.is_some() {
+    let input: &mut dyn Readable<Self> = if input_filename.is_some() {
         let file = File::open(input_filename.unwrap())?;
         defer file.close();
 
-        &file as &mut dyn Readable<Self>
+        &file
     } else {
-        &StdioStream::stdin() as &mut dyn Readable<Self>
+        &StdioStream::stdin()
     };
 
     let input = BufferedReader::new(&input, DEFAULT_BUFFER_SIZE);

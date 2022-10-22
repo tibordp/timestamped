@@ -108,7 +108,7 @@ impl Recorder {
                         remaining -= 1;
                     }
                     if !buf.is_empty() {
-                        self.write_output(timestamp, inputs[i].0, buf.as_slice())?;
+                        self.write_output(timestamp, inputs[i].0, buf[..])?;
                         buf.clear();
                     }
                 }
@@ -232,7 +232,7 @@ impl JsonConverter {
                 "{{\"stream\":{},\"micros\":{},\"contents\":\"{}\"}}",
                 stream as u8,
                 micros,
-                buf.as_slice().to_base64()
+                buf[..].to_base64()
             )
             .map_err(map_err)?;
         }
