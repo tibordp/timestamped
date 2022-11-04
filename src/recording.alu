@@ -50,7 +50,7 @@ impl Recorder {
 
         let status = child.wait()?;
 
-        self.output.write_all("\0");
+        self.output.write_all("\0")?;
         self.output.write_any((status as u32).to_be())?;
 
         Result::ok(())
@@ -102,7 +102,7 @@ impl Recorder {
             for i in 0usize..inputs.len() {
                 if fds[i].revents != 0 {
                     if inputs[i].1.read_some(&buf)? {
-                        inputs[i].1.close();
+                        inputs[i].1.close()?;
                         fds[i].revents = 0;
                         fds[i].fd = -1;
                         remaining -= 1;

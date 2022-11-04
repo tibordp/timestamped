@@ -44,7 +44,7 @@ struct Base64Encoded {
 }
 
 impl Base64Encoded {
-    use std::fmt::{Formattable, Formatter, Result};
+    use std::fmt::{Formatter, Result};
 
     fn new(bytes: &[u8]) -> Base64Encoded {
         Base64Encoded {
@@ -53,7 +53,7 @@ impl Base64Encoded {
     }
 
     fn fmt<F: Formatter<F>>(self: &Base64Encoded, f: &mut F) -> Result {
-        const BASE64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        const BASE64: &[u8] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
         let acc: u16;
         let remaining = 0i32;
@@ -70,20 +70,20 @@ impl Base64Encoded {
             }
 
             let bits = (acc >> (remaining - 6)) & 0x3f;
-            f.write_char(BASE64[bits as usize]);
+            f.write_byte(BASE64[bits as usize])?;
             remaining -= 6;
         }
 
         switch remaining {
             2 => {
                 let bits = (acc & 0x3) << 4;
-                f.write_char(BASE64[bits as usize]);
-                f.write_str("==");
+                f.write_byte(BASE64[bits as usize])?;
+                f.write_str("==")?;
             }
             4 => {
                 let bits = (acc & 0xf) << 2;
-                f.write_char(BASE64[bits as usize]);
-                f.write_str("=");
+                f.write_byte(BASE64[bits as usize])?;
+                f.write_str("=")?;
             }
             _ => {}
         }

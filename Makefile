@@ -6,11 +6,11 @@ SYSROOT ?= /usr/local/share/alumina
 ifdef RELEASE
 	BUILD_DIR = $(BUILD_ROOT)/release
 	CFLAGS += -O3
-	ALUMINA_FLAGS += --cfg threading --sysroot $(SYSROOT) --timings
+	ALUMINA_FLAGS += --cfg threading --sysroot $(SYSROOT)
 else
 	BUILD_DIR = $(BUILD_ROOT)/debug
 	CFLAGS += -g3 -fPIE -rdynamic
-	ALUMINA_FLAGS += --cfg threading --sysroot $(SYSROOT) --debug --timings
+	ALUMINA_FLAGS += --cfg threading --sysroot $(SYSROOT) --debug
 endif
 
 BUILD_ROOT = build
