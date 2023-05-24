@@ -1,4 +1,4 @@
-use std::process::{Command, Stdio, env};
+use std::process::{Command, Stdio, ExitStatus, env};
 use std::fs::{PathBuf, Path, FileAttr, PathSegmentKind};
 use std::io::{Error, Result, FileDescriptor, StdioStream, BufferedWriter, DEFAULT_BUFFER_SIZE};
 use std::string::StringBuf;
@@ -27,6 +27,12 @@ impl Recorder {
         }
     }
 
+    /// Return the number of microseconds since the start of the recording
+    fn micros_since(self: &Recorder, instant: Instant) -> u64 {
+        let since_start = instant.duration_since(&self.start_time);
+        (since_start.secs as u64) * 1000000 + (since_start.nanos as u64) / 1000
+    }
+
     fn record(self: &mut Recorder) -> Result<()> {
         use utils::{find_binary, write_any};
 
@@ -50,8 +56,11 @@ impl Recorder {
 
         let status = child.wait()?;
 
+        let micros = self.micros_since(Instant::now());
+
         self.output.write_all("\0")?;
-        self.output.write_any((status as u32).to_be())?;
+        self.output.write_any(micros.to_be())?;
+        self.output.write_any((status.wait_status() as u32).to_be())?;
 
         Result::ok(())
     }
@@ -67,8 +76,7 @@ impl Recorder {
             }
         }
 
-        let since_start = timestamp.duration_since(&self.start_time);
-        let micros: u64 = (since_start.secs as u64) * 1000000 + (since_start.nanos as u64) / 1000;
+        let micros = self.micros_since(timestamp);
 
         self.output.write_any((stream as u8) | 0b10000000u8)?;
         self.output.write_any(micros.to_be())?;
@@ -143,20 +151,28 @@ fn read_header(input: &mut dyn io::Readable<Self>) -> Result<Option<(StandardStr
 }
 
 struct Replayer {
-    input: &mut dyn io::Readable<Self>
+    input: &mut dyn io::Readable<Self>,
+    speed: f64,
+    start_time: Instant
 }
 
 impl Replayer {
-    fn new(input: &mut dyn io::Readable<Self>) -> Replayer {
+    fn new(input: &mut dyn io::Readable<Self>, speed: f64) -> Replayer {
         Replayer {
-            input: input
+            input: input,
+            speed: speed,
+            start_time: Instant::now()
         }
     }
 
-    fn replay(self: &mut Replayer) -> Result<i32> {
+    fn due_time(self: &Replayer, micros: u64) -> Instant {
+        micros = (micros as f64 / self.speed) as u64;
+        self.start_time.add(&Duration::from_micros(micros as i64))
+    }
+
+    fn replay(self: &mut Replayer) -> Result<ExitStatus> {
         use std::io::{copy_using, take};
         use utils::read_any;
-        let start_time = Instant::now();
 
         let buf: &mut [u8] = std::mem::slice::alloc(DEFAULT_BUFFER_SIZE);
         defer buf.free();
@@ -164,13 +180,23 @@ impl Replayer {
         loop {
             let maybe_header = self.input.read_header()?;
             if !maybe_header.is_some() {
+                let exited_at: Result<u64> = self.input.read_any();
+                let micros = exited_at?.from_be();
+
+                std::thread::sleep(self
+                    .due_time(micros)
+                    .duration_since(&Instant::now())
+                );
+
                 let maybe_exit_status: Result<u32> = self.input.read_any();
-                return Result::ok(maybe_exit_status?.from_be() as i32);
+                return Result::ok(ExitStatus::from_wait_status(maybe_exit_status?.from_be() as i32));
             }
 
             let (stream, micros, len) = maybe_header.unwrap();
-            let due_time = start_time.add(&Duration::from_micros(micros as i64));
-            std::thread::sleep(due_time.duration_since(&Instant::now()));
+            std::thread::sleep(self
+                .due_time(micros)
+                .duration_since(&Instant::now())
+            );
 
             switch stream {
                 StandardStream::Out => {
@@ -237,8 +263,13 @@ impl JsonConverter {
             .map_err(map_err)?;
         }
 
+        let exited_micros: Result<u64> = self.input.read_any();
         let maybe_exit_status: Result<u32> = self.input.read_any();
-        write!(&fmt, "],\"exit_status\":{}}}", maybe_exit_status?.from_be() as i32).map_err(map_err)?;
+
+        write!(&fmt, "],\"exited_at\":{},\"exit_status\":{}}}",
+            exited_micros?.from_be(),
+            maybe_exit_status?.from_be()
+        ).map_err(map_err)?;
 
         Result::ok(())
     }

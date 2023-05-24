@@ -78,8 +78,46 @@ fn record(args: &[&[u8]]) -> Result<()> {
 
 fn replay(args: &[&[u8]]) -> Result<()> {
     fn usage() -> ! {
-        eprintln!("Usage: timestamped replay [<file>]");
+        eprintln!("Usage: timestamped replay [OPTIONS] [<file>]");
+        eprintln!("");
+        eprintln!("Options:");
+        eprintln!("  -s, --speed          Adjust the replay speed [default: 1.0]");
         process::exit(1)
+    }
+
+    enum State {
+        Normal,
+        Speed
+    }
+
+    let speed = 1.0f64;
+    let state = State::Normal;
+
+    for (idx, arg) in args.iter().enumerate() {
+        state = switch state {
+            State::Normal => switch arg {
+                "--help" => usage(),
+                "-s", "--speed" => State::Speed,
+                _ => {
+                    args = args[idx..];
+                    break;
+                },
+            },
+            State::Speed => {
+                let maybe_speed = f64::parse(arg);
+                if maybe_speed.is_none() {
+                    eprintln!("Invalid speed (must be a number)");
+                    process::exit(1);
+                }
+                speed = maybe_speed.unwrap();
+                if speed <= 0.0 {
+                    eprintln!("Invalid speed (must be positive)");
+                    process::exit(1);
+                }
+                State::Normal
+            }
+            _ => unreachable!()
+        }
     }
 
     let stream = if args.len() == 0 {
@@ -94,15 +132,15 @@ fn replay(args: &[&[u8]]) -> Result<()> {
     let buffered = BufferedReader::new(&stream, DEFAULT_BUFFER_SIZE);
     defer buffered.free();
 
-    let replayer = Replayer::new(&buffered);
+    let replayer = Replayer::new(&buffered, speed);
     let exit_status = replayer.replay()?;
 
-    if (exit_status & 0x7f) == 0 {
-        std::process::exit((exit_status >> 8) & 0xff)
-    } else if ((exit_status & 0x7f) + 1) as i8 >= 2 {
+    if exit_status.code().is_some() {
+        std::process::exit(exit_status.code().unwrap())
+    } else if (exit_status.signal().is_some()) {
         // Faithfully recreate process terminating due to a signal
         // by killing ourselves.
-        libc::kill(libc::getpid(), exit_status & 0x7f);
+        libc::raise(exit_status.signal().unwrap());
         unreachable!()
     } else {
         std::process::exit(-1);
@@ -148,7 +186,7 @@ fn json(args: &[&[u8]]) -> Result<()> {
     }
 
     let output: &mut dyn Writable<Self> = if output_filename.is_some() {
-        let file = File::create(output_filename.unwrap())?
+        let file = File::create(output_filename.unwrap())?;
         defer file.close();
 
         &file
@@ -184,7 +222,7 @@ fn main(args: &[&[u8]]) -> i32 {
         eprintln!("");
         eprintln!("Commands:");
         eprintln!("  record [OPTIONS] -- <cmd> [<args>]    Record the output of <command>");
-        eprintln!("  replay [<file>]                       Replay the output from <file> (or stdin)");
+        eprintln!("  replay [OPTIONS] [<file>]                       Replay the output from <file> (or stdin)");
         eprintln!("  json [<file>]                         Convert a recording from <file> (or stdin) to JSON");
         eprintln!("");
         eprintln!("Options:");
